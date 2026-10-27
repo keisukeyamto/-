@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>ノルヴァルト海軍 艦艇データベース</title>
+<style>
+:root{--bg:#eef1f2;--card:#fff;--ink:#1d2b36;--mute:#5d6b75;--line:#cfd6da;--sea:#2f5d73;--rust:#b5502f;--onsea:#fff}
+@media(prefers-color-scheme:dark){:root{--bg:#14191d;--card:#1c242a;--ink:#e6ecef;--mute:#98a6af;--line:#33404a;--sea:#6fa3bb;--rust:#e08a6a;--onsea:#10181d}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.6 "Hiragino Sans","Noto Sans JP","Yu Gothic",sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+header{position:sticky;top:0;background:var(--bg);border-bottom:2px solid var(--sea);padding:12px 14px;z-index:5}
+h1{font-size:1.1rem;margin:0 0 8px;letter-spacing:.04em}
+.bar{display:flex;gap:8px}
+input,textarea,button{font:inherit;color:var(--ink)}
+input[type=search]{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card)}
+button{border:1px solid var(--sea);background:transparent;color:var(--sea);padding:9px 14px;border-radius:6px;cursor:pointer}
+button.pri{background:var(--sea);color:var(--onsea)}
+button.del{border-color:var(--rust);color:var(--rust)}
+:focus-visible{outline:3px solid var(--rust);outline-offset:2px}
+main{max-width:760px;margin:0 auto;padding:12px 14px 80px}
+.count{color:var(--mute);font-size:.85rem;margin:4px 0 10px}
+.card{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--sea);border-radius:4px;padding:12px 14px;margin-bottom:12px}
+.card h2{font-size:1.15rem;margin:0}
+.no{color:var(--rust);font-weight:700;margin-left:8px;font-size:.95rem}
+.row{margin-top:8px;font-size:.93rem;white-space:pre-wrap;overflow-wrap:anywhere}
+.row b{color:var(--mute);font-weight:600;display:block;font-size:.8rem}
+.photos{display:flex;gap:6px;overflow-x:auto;margin-top:10px}
+.photos img{height:90px;border-radius:3px;cursor:zoom-in;flex:none}
+.acts{display:flex;gap:8px;margin-top:10px}
+.empty{text-align:center;color:var(--mute);padding:40px 0}
+dialog{width:min(560px,94vw);max-height:92vh;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);padding:16px}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+label{display:block;margin-top:10px;font-size:.85rem;color:var(--mute)}
+label input,label textarea{display:block;width:100%;margin-top:3px;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.thumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.thumbs div{position:relative}
+.thumbs img{height:64px;border-radius:3px;display:block}
+.thumbs button{position:absolute;top:-6px;right:-6px;padding:0 6px;line-height:1.3;background:var(--card)}
+.foot{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+#big{padding:0;background:#000;width:96vw}
+#big img{width:100%;display:block}
+.tools{display:flex;gap:8px;margin-top:20px;flex-wrap:wrap}
+@media(prefers-reduced-motion:no-preference){.card{transition:border-color .2s}}
+</style>
+</head>
+<body>
+<header>
+  <h1>ノルヴァルト海軍 艦艇データベース</h1>
+  <div class="bar">
+    <input type="search" id="q" placeholder="艦名・武装・番号・備考で検索" aria-label="検索">
+    <button class="pri" id="add">追加</button>
+  </div>
+</header>
+<main>
+  <div class="count" id="count"></div>
+  <div id="list"></div>
+  <div class="tools">
+    <button id="exp">バックアップを保存</button>
+    <button id="imp">バックアップを読み込む</button>
+    <input type="file" id="impf" accept="application/json" hidden>
+  </div>
+</main>
+
+<dialog id="dlg">
+  <form id="f" method="dialog">
+    <label>艦名<input name="name" required></label>
+    <label>艦番号<input name="no" placeholder="例: PS-1"></label>
+    <label>武装<textarea name="arms" rows="3"></textarea></label>
+    <label>日時<input name="date" placeholder="例: 2026-10-27 / 1950年代"></label>
+    <label>詳細・備考<textarea name="note" rows="4"></textarea></label>
+    <label>写真<input type="file" id="pf" accept="image/*" multiple></label>
+    <div class="thumbs" id="th"></div>
+    <div class="foot">
+      <button type="button" id="cancel">キャンセル</button>
+      <button type="submit" class="pri">保存</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="big"><img alt=""></dialog>
+
+<script>
+(function(){
+var DB="norvald-ships",ST="ships",db=null,mem=[],ships=[],editing=null,photos=[];
+var $=function(s){return document.querySelector(s)};
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+
+function open(){return new Promise(function(res){
+  try{var r=indexedDB.open(DB,1);
+    r.onupgradeneeded=function(){r.result.createObjectStore(ST,{keyPath:"id"})};
+    r.onsuccess=function(){db=r.result;res()};
+    r.onerror=function(){res()};
+  }catch(e){res()}
+})}
+function all(){return new Promise(function(res){
+  if(!db)return res(mem.slice());
+  var q=db.transaction(ST).objectStore(ST).getAll();
+  q.onsuccess=function(){res(q.result)};q.onerror=function(){res([])};
+})}
+function put(o){return new Promise(function(res){
+  if(!db){mem=mem.filter(function(x){return x.id!==o.id}).concat(o);return res()}
+  var t=db.transaction(ST,"readwrite");t.objectStore(ST).put(o);t.oncomplete=res;t.onerror=res;
+})}
+function rm(id){return new Promise(function(res){
+  if(!db){mem=mem.filter(function(x){return x.id!==id});return res()}
+  var t=db.transaction(ST,"readwrite");t.objectStore(ST).delete(id);t.oncomplete=res;t.onerror=res;
+})}
+
+function seed(){
+  var now=Date.now(),t=[
+    {name:"ヴァルシェン",no:"",arms:"八方位選択式近距離VLS Type 1(試験)\nType 2対潜爆雷投射機",date:"1950年代",note:"小型戦闘艦。兵装試験艦。ノルヴァルト国初の戦闘艦。"},
+    {name:"PS-1",no:"PS-1",arms:"艦首砲 1門",date:"",note:"巡視船。建造所NSS。沿岸警備隊の旗艦的存在で、将官艇などを乗せる予定。上部構造物は完成に近い。"},
+    {name:"ノルヴァルト・ヤタガラス",no:"",arms:"",date:"",note:"ヤタガラス級1番艦。ミサイル重巡洋艦。原子炉2基・蒸気タービン、最大32ノット。設計構想段階。"}
+  ];
+  return Promise.all(t.map(function(s,i){s.id="s"+(now+i);s.photos=[];s.created=now+i;return put(s)}));
+}
+
+function render(){
+  var k=$("#q").value.trim().toLowerCase(),L=$("#list"),n=0;
+  var rows=ships.slice().sort(function(a,b){return b.created-a.created}).filter(function(s){
+    return !k||[s.name,s.no,s.arms,s.note,s.date].join("\n").toLowerCase().indexOf(k)>=0});
+  n=rows.length;
+  $("#count").textContent=n+" 件"+(k?"(検索結果)":"");
+  if(!n){L.innerHTML='<div class="empty">'+(k?"該当なし":"まだ登録がありません。「追加」から入力できます")+'</div>';return}
+  L.innerHTML=rows.map(function(s){
+    var r=function(l,v){return v?'<div class="row"><b>'+l+'</b>'+esc(v)+'</div>':""};
+    return '<article class="card" data-id="'+s.id+'"><h2>'+esc(s.name)+(s.no?'<span class="no">'+esc(s.no)+'</span>':"")+'</h2>'
+      +r("武装",s.arms)+r("日時",s.date)+r("詳細・備考",s.note)
+      +(s.photos&&s.photos.length?'<div class="photos">'+s.photos.map(function(p,i){return '<img src="'+p+'" data-i="'+i+'" alt="'+esc(s.name)+'の写真">'}).join("")+'</div>':"")
+      +'<div class="acts"><button data-a="e">編集</button><button class="del" data-a="d">削除</button></div></article>';
+  }).join("");
+}
+
+function thumbs(){
+  $("#th").innerHTML=photos.map(function(p,i){return '<div><img src="'+p+'" alt=""><button type="button" data-x="'+i+'" aria-label="写真を外す">×</button></div>'}).join("");
+}
+function openForm(s){
+  editing=s||null;var f=$("#f");
+  f.name.value=s?s.name:"";f.no.value=s?s.no:"";f.arms.value=s?s.arms:"";
+  f.date.value=s?s.date:"";f.note.value=s?s.note:"";
+  photos=s&&s.photos?s.photos.slice():[];thumbs();$("#pf").value="";
+  $("#dlg").showModal();
+}
+function shrink(file){return new Promise(function(res){
+  var fr=new FileReader();
+  fr.onload=function(){var im=new Image();
+    im.onload=function(){var m=1200,w=im.width,h=im.height,sc=Math.min(1,m/Math.max(w,h));
+      var c=document.createElement("canvas");c.width=Math.round(w*sc);c.height=Math.round(h*sc);
+      c.getContext("2d").drawImage(im,0,0,c.width,c.height);res(c.toDataURL("image/jpeg",.82))};
+    im.onerror=function(){res(null)};im.src=fr.result};
+  fr.onerror=function(){res(null)};fr.readAsDataURL(file);
+})}
+
+$("#q").addEventListener("input",render);
+$("#add").onclick=function(){openForm()};
+$("#cancel").onclick=function(){$("#dlg").close()};
+$("#pf").onchange=function(e){
+  Promise.all(Array.prototype.map.call(e.target.files,shrink)).then(function(r){
+    photos=photos.concat(r.filter(Boolean));thumbs();e.target.value="";
+  });
+};
+$("#th").onclick=function(e){var x=e.target.getAttribute("data-x");if(x!==null){photos.splice(+x,1);thumbs()}};
+$("#f").onsubmit=function(e){
+  e.preventDefault();var f=e.target;
+  var o=editing||{id:"s"+Date.now(),created:Date.now()};
+  o.name=f.name.value.trim();o.no=f.no.value.trim();o.arms=f.arms.value.trim();
+  o.date=f.date.value.trim();o.note=f.note.value.trim();o.photos=photos.slice();
+  put(o).then(all).then(function(a){ships=a;render();$("#dlg").close()});
+};
+$("#list").onclick=function(e){
+  var card=e.target.closest(".card");if(!card)return;
+  var s=ships.filter(function(x){return x.id===card.dataset.id})[0];if(!s)return;
+  var a=e.target.getAttribute("data-a");
+  if(a==="e")openForm(s);
+  else if(a==="d"){if(confirm("「"+s.name+"」を削除する?"))rm(s.id).then(all).then(function(r){ships=r;render()})}
+  else if(e.target.tagName==="IMG"){$("#big img").src=s.photos[+e.target.dataset.i];$("#big").showModal()}
+};
+$("#big").onclick=function(){this.close()};
+$("#exp").onclick=function(){
+  var b=new Blob([JSON.stringify(ships)],{type:"application/json"}),a=document.createElement("a");
+  a.href=URL.createObjectURL(b);a.download="norvald-ships-backup.json";a.click();
+};
+$("#imp").onclick=function(){$("#impf").click()};
+$("#impf").onchange=function(e){
+  var fr=new FileReader();
+  fr.onload=function(){try{
+    var d=JSON.parse(fr.result);if(!Array.isArray(d))throw 0;
+    if(!confirm(d.length+" 件を読み込む?(同じIDは上書き)"))return;
+    Promise.all(d.map(put)).then(all).then(function(r){ships=r;render()});
+  }catch(x){alert("読み込めないファイルです")}};
+  if(e.target.files[0])fr.readAsText(e.target.files[0]);e.target.value="";
+};
+
+open().then(all).then(function(a){
+  var seeded=false;try{seeded=localStorage.getItem("seeded")}catch(e){}
+  if(!a.length&&!seeded){return seed().then(function(){try{localStorage.setItem("seeded","1")}catch(e){}return all()})}
+  return a;
+}).then(function(a){ships=a;render()});
+})();
+</script>
+</body>
+</html>
